@@ -1,10 +1,111 @@
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
-import Anthropic from "@anthropic-ai/sdk";
 
+// ── RSS sources ───────────────────────────────────────────────────────────────
+const RSS_FEEDS = [
+  { url: "https://www.anthropic.com/news/rss.xml",       source: "Anthropic Blog" },
+  { url: "https://www.theverge.com/rss/index.xml",       source: "The Verge" },
+  { url: "https://techcrunch.com/category/artificial-intelligence/feed/", source: "TechCrunch AI" },
+];
+
+const KEYWORDS = ["anthropic", "claude", "claude code", "claude design", "claude cowork", "mcp", "model context protocol"];
+
+const CAT_RULES: Array<{ pattern: RegExp; cat: string }> = [
+  { pattern: /claude\s*code/i,   cat: "code" },
+  { pattern: /claude\s*design/i, cat: "design" },
+  { pattern: /claude\s*cowork/i, cat: "cowork" },
+  { pattern: /\bclaude\b/i,      cat: "claude" },
+  { pattern: /anthropic/i,       cat: "anthropic" },
+];
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function detectCategory(text: string): string {
+  for (const { pattern, cat } of CAT_RULES) {
+    if (pattern.test(text)) return cat;
+  }
+  return "anthropic";
+}
+
+function isRelevant(text: string): boolean {
+  const lower = text.toLowerCase();
+  return KEYWORDS.some((kw) => lower.includes(kw));
+}
+
+function stripTags(html: string): string {
+  return html.replace(/<[^>]*>/g, "").replace(/\s+/g, " ").trim();
+}
+
+function truncate(str: string, max: number): string {
+  return str.length <= max ? str : str.slice(0, max - 1) + "…";
+}
+
+interface RssItem {
+  titulo: string;
+  descripcion: string;
+  url_fuente: string;
+  fuente: string;
+  categoria: string;
+  fecha_publicacion: string;
+}
+
+async function fetchFeed(feedUrl: string, sourceName: string): Promise<RssItem[]> {
+  const res = await fetch(feedUrl, {
+    headers: { "User-Agent": "Anthropic24H-Bot/1.0" },
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status} fetching ${feedUrl}`);
+  const xml = await res.text();
+
+  const items: RssItem[] = [];
+
+  // Match <item> or <entry> blocks (handles both RSS 2.0 and Atom)
+  const itemRegex = /<(?:item|entry)[\s>]([\s\S]*?)<\/(?:item|entry)>/gi;
+  let match: RegExpExecArray | null;
+
+  while ((match = itemRegex.exec(xml)) !== null) {
+    const block = match[1];
+
+    const title = stripTags(
+      (/<title[^>]*><!\[CDATA\[([\s\S]*?)\]\]><\/title>/i.exec(block) ??
+       /<title[^>]*>([\s\S]*?)<\/title>/i.exec(block))?.[1] ?? ""
+    );
+
+    const desc = stripTags(
+      (/<description[^>]*><!\[CDATA\[([\s\S]*?)\]\]><\/description>/i.exec(block) ??
+       /<description[^>]*>([\s\S]*?)<\/description>/i.exec(block) ??
+       /<summary[^>]*><!\[CDATA\[([\s\S]*?)\]\]><\/summary>/i.exec(block) ??
+       /<summary[^>]*>([\s\S]*?)<\/summary>/i.exec(block))?.[1] ?? ""
+    );
+
+    const link =
+      (/<link[^>]*href="([^"]+)"/i.exec(block) ??
+       /<link[^>]*>(https?:\/\/[^<]+)<\/link>/i.exec(block))?.[1]?.trim() ?? "";
+
+    const pubDate =
+      (/<pubDate[^>]*>([\s\S]*?)<\/pubDate>/i.exec(block) ??
+       /<published[^>]*>([\s\S]*?)<\/published>/i.exec(block) ??
+       /<updated[^>]*>([\s\S]*?)<\/updated>/i.exec(block))?.[1]?.trim() ?? "";
+
+    if (!title || !link) continue;
+    const combined = `${title} ${desc}`;
+    if (!isRelevant(combined)) continue;
+
+    items.push({
+      titulo: truncate(title, 200),
+      descripcion: truncate(desc || title, 400),
+      url_fuente: link,
+      fuente: sourceName,
+      categoria: detectCategory(combined),
+      fecha_publicacion: pubDate ? new Date(pubDate).toISOString() : new Date().toISOString(),
+    });
+  }
+
+  return items;
+}
+
+// ── Handler ───────────────────────────────────────────────────────────────────
 export async function GET(request: NextRequest) {
-  // Verify cron auth
   const authHeader = request.headers.get("authorization");
   const isVercelCron = request.headers.get("x-vercel-cron") === "1";
   if (!isVercelCron && authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
@@ -13,67 +114,48 @@ export async function GET(request: NextRequest) {
 
   try {
     const supabase = createServerClient();
-    const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-    // 1. Delete expired news
+    // 1. Delete expired noticias
     await supabase
       .from("noticias")
       .delete()
       .lt("fecha_expiracion", new Date().toISOString());
 
-    // 2. Generate news with Claude
-    const message = await anthropic.messages.create({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 2000,
-      messages: [
-        {
-          role: "user",
-          content: `Genera exactamente 6 noticias ficticias pero realistas sobre el ecosistema Anthropic del día de hoy (${new Date().toISOString().split("T")[0]}).
+    // 2. Fetch existing URLs to avoid duplicates
+    const { data: existing } = await supabase
+      .from("noticias")
+      .select("url_fuente");
+    const existingUrls = new Set((existing ?? []).map((r: { url_fuente: string }) => r.url_fuente));
 
-Las noticias deben cubrir: Anthropic empresa, Claude (el modelo), Claude Code, Claude Design.
+    // 3. Fetch all RSS feeds in parallel
+    const results = await Promise.allSettled(
+      RSS_FEEDS.map((f) => fetchFeed(f.url, f.source))
+    );
 
-Devuelve un JSON array con exactamente este formato, sin texto adicional:
-[
-  {
-    "titulo": "string (max 100 chars)",
-    "descripcion": "string (2-3 frases, max 200 chars)",
-    "fuente": "string (nombre de medio: Anthropic Blog, GitHub Releases, etc.)",
-    "categoria": "claude|code|design|anthropic",
-    "url_fuente": "https://example.com"
-  }
-]`,
-        },
-      ],
-    });
+    const allItems: RssItem[] = [];
+    for (const r of results) {
+      if (r.status === "fulfilled") allItems.push(...r.value);
+    }
 
-    const content = message.content[0];
-    if (content.type !== "text") throw new Error("Unexpected response type");
+    // 4. Deduplicate by URL, skip already-stored
+    const seen = new Set<string>();
+    const toInsert = allItems
+      .filter((item) => {
+        if (!item.url_fuente || existingUrls.has(item.url_fuente)) return false;
+        if (seen.has(item.url_fuente)) return false;
+        seen.add(item.url_fuente);
+        return true;
+      })
+      .map((item) => ({
+        ...item,
+        fecha_expiracion: new Date(
+          Date.now() + 7 * 24 * 60 * 60 * 1000
+        ).toISOString(),
+      }));
 
-    // Parse JSON from Claude's response
-    const jsonMatch = content.text.match(/\[[\s\S]*\]/);
-    if (!jsonMatch) throw new Error("No JSON found in response");
-
-    const newsItems = JSON.parse(jsonMatch[0]) as Array<{
-      titulo: string;
-      descripcion: string;
-      fuente: string;
-      categoria: string;
-      url_fuente: string;
-    }>;
-
-    const now = new Date();
-    const expiration = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000); // +7 days
-
-    // 3. Insert new news
-    const toInsert = newsItems.map((item) => ({
-      titulo: item.titulo,
-      descripcion: item.descripcion,
-      url_fuente: item.url_fuente,
-      fuente: item.fuente,
-      categoria: item.categoria,
-      fecha_publicacion: now.toISOString(),
-      fecha_expiracion: expiration.toISOString(),
-    }));
+    if (toInsert.length === 0) {
+      return NextResponse.json({ ok: true, inserted: 0, message: "No new items" });
+    }
 
     const { error } = await supabase.from("noticias").insert(toInsert);
     if (error) throw error;
