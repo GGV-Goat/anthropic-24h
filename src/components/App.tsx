@@ -1,6 +1,6 @@
 "use client";
 import { useState, useCallback } from "react";
-import { CursorEffect } from "./CursorEffect";
+import { CursorEffect, triggerSmokeTransition } from "./CursorEffect";
 import { Modal } from "./ui/Modal";
 import { HeroPage } from "./pages/HeroPage";
 import { ToolsPage } from "./pages/ToolsPage";
@@ -22,8 +22,13 @@ export function App() {
   const openModal = useCallback((item: ModalItem) => setModal(item), []);
   const closeModal = useCallback(() => setModal(null), []);
 
+  const handleSetPage = useCallback((newPage: string) => {
+    setPage(newPage);
+    triggerSmokeTransition();
+  }, []);
+
   const pages: Record<string, React.ReactNode> = {
-    hero: <HeroPage setPage={setPage} />,
+    hero: <HeroPage setPage={handleSetPage} />,
     tools: <ToolsPage openModal={openModal} />,
     code: <CodePage openModal={openModal} />,
     news: <NewsPage />,
@@ -31,20 +36,15 @@ export function App() {
 
   return (
     <>
-      {/* Background iris */}
-      <div id="iris-wrap">
-        <div id="iris-scaler">
-          <div id="iris" />
-        </div>
-        <div id="s1" className="star" />
-        <div id="s2" className="star" />
-        <div id="s3" className="star" />
-      </div>
+      {/* Background: pixel-shader smoke + node mesh */}
+      <canvas id="smoke" />
+      <canvas id="mesh" />
 
       {/* Cursor layers */}
       <div id="cf" />
       <div id="cc" />
       <div id="cd" />
+      <div id="cm" />
 
       {/* Cursor JS effect */}
       <CursorEffect />
@@ -54,7 +54,7 @@ export function App() {
         <a
           href="#"
           className="nl"
-          onClick={(e) => { e.preventDefault(); setPage("hero"); }}
+          onClick={(e) => { e.preventDefault(); handleSetPage("hero"); }}
         >
           <div className="nlm">A</div>
           <span>Anthropic<span style={{ color: "var(--v)" }}>24H</span></span>
@@ -64,7 +64,7 @@ export function App() {
             <button
               key={n.id}
               className={`nt ${page === n.id ? "on" : ""}`}
-              onClick={() => setPage(n.id)}
+              onClick={() => handleSetPage(n.id)}
             >
               {n.label}
             </button>

@@ -1,24 +1,19 @@
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "./database.types";
 
-// Lazy singleton — avoids build-time initialization error when env vars are missing
+const URL  = () => process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const KEY  = () => process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+
+// Lazy singleton — avoids build-time error when env vars are placeholder strings
 let _client: SupabaseClient<Database> | null = null;
 
 export function getSupabase(): SupabaseClient<Database> {
-  if (!_client) {
-    _client = createClient<Database>(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-    );
-  }
+  if (!_client) _client = createClient<Database>(URL(), KEY());
   return _client;
 }
 
-// Server-side untyped client for cron routes
+// Server-side client for API routes — same anon key, no service role needed
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function createServerClient(): SupabaseClient<any> {
-  return createClient(
-    process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  );
+  return createClient(URL(), KEY());
 }

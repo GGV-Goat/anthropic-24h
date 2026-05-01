@@ -12,9 +12,10 @@ interface GlassCardProps {
   className?: string;
   style?: React.CSSProperties;
   onClick?: (e: RMouseEvent<HTMLDivElement>) => void;
+  color?: string;
 }
 
-export function GlassCard({ children, className = "", style = {}, onClick }: GlassCardProps) {
+export function GlassCard({ children, className = "", style = {}, onClick, color }: GlassCardProps) {
   const [ripples, setRipples] = useState<Ripple[]>([]);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -27,8 +28,10 @@ export function GlassCard({ children, className = "", style = {}, onClick }: Gla
     if (onClick) onClick(e);
   }
 
+  const mergedStyle = color ? { "--cc": color, ...style } as React.CSSProperties : style;
+
   return (
-    <div ref={ref} className={`gc ${className}`} style={style} onClick={addRipple}>
+    <div ref={ref} className={`gc ${className}`} style={mergedStyle} onClick={addRipple}>
       {ripples.map((r) => (
         <span
           key={r.id}

@@ -6,6 +6,12 @@ import { LogoCode } from "@/components/logos/ToolLogos";
 import { SKILLS, MCP_SERVERS, CLIS, COMMUNITY, CATS } from "@/lib/data";
 import type { ModalItem } from "@/lib/data";
 
+const CAT_COLORS: Record<string, Record<string, string>> = {
+  skills:  { web: "#06b6d4", auto: "#8b5cf6", data: "#3b82f6", prod: "#10b981" },
+  mcp:     { web: "#0ea5e9", auto: "#6366f1", data: "#2dd4bf", prod: "#a78bfa" },
+  clis:    { web: "#f97316", auto: "#ec4899", data: "#eab308", prod: "#84cc16" },
+};
+
 const TABS = [
   { id: "skills", label: "Skills" },
   { id: "mcp", label: "MCP Servers" },
@@ -88,7 +94,7 @@ export function CodePage({ openModal }: CodePageProps) {
       {(tab === "skills" || tab === "mcp" || tab === "clis") && (
         <div className="sgrid">
           {items.map((s) => (
-            <GlassCard key={s.name} className="scard">
+            <GlassCard key={s.name} className="scard" color={(CAT_COLORS[tab] ?? {})[cat]}>
               <div className="scat">{s.cat}</div>
               <div className="srow">
                 <div className="sname">{s.name}</div>
@@ -110,7 +116,7 @@ export function CodePage({ openModal }: CodePageProps) {
       {tab === "community" && (
         <div className="cgrid">
           {COMMUNITY.map((c) => (
-            <GlassCard key={c.name} className="ccard">
+            <GlassCard key={c.name} className="ccard" color={c.color}>
               <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 10 }}>
                 <span
                   style={{

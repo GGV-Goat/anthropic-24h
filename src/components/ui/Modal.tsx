@@ -11,11 +11,15 @@ interface ModalProps {
 
 export function Modal({ item, onClose }: ModalProps) {
   useEffect(() => {
+    document.body.classList.add("modal-open");
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") onClose();
     }
     document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
+    return () => {
+      document.body.classList.remove("modal-open");
+      document.removeEventListener("keydown", onKey);
+    };
   }, [onClose]);
 
   return (

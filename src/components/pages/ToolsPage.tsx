@@ -5,6 +5,13 @@ import { ToolLogo } from "@/components/logos/ToolLogos";
 import { TOOLS } from "@/lib/data";
 import type { ModalItem } from "@/lib/data";
 
+const TOOL_COLORS: Record<string, string> = {
+  claude:         "#e8886a",
+  "claude-code":  "#3b82f6",
+  "claude-design":"#d946ef",
+  "claude-cowork":"#f59e0b",
+};
+
 interface ToolsPageProps {
   openModal: (item: ModalItem) => void;
 }
@@ -19,7 +26,7 @@ export function ToolsPage({ openModal }: ToolsPageProps) {
       </div>
       <div className="tgrid">
         {TOOLS.map((t, i) => (
-          <GlassCard key={t.id} className={`tcard fade-up d${i + 2}`}>
+          <GlassCard key={t.id} className={`tcard fade-up d${i + 2}`} color={TOOL_COLORS[t.id]}>
             <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 18 }}>
               <ToolLogo id={t.logoId} size={44} />
               <Badge type={t.status} />
